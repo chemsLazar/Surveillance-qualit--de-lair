@@ -1,12 +1,12 @@
 import paho.mqtt.client as mqtt
 
 # Callback lorsque la connexion MQTT est établie
-def on_connect(client, userdata, flags, rc, properties):  # Ajout de `properties`
+def on_connect(client, userdata, flags, rc, properties):
     print("Connecté au broker MQTT avec le code de résultat "+str(rc))
     
     if rc == 0:
         print("Connexion réussie.")
-        # Abonnement aux sujets que l'ESP32 publie
+
         client.subscribe("data/temperature")
         client.subscribe("data/humidity")
         client.subscribe("data/pm25")
@@ -21,7 +21,6 @@ def on_connect(client, userdata, flags, rc, properties):  # Ajout de `properties
 def on_message(client, userdata, msg):
     print(f"Message reçu sur le sujet {msg.topic}: {msg.payload.decode()}")
 
-    # Traitement des données reçues
     data_mapping = {
         "data/temperature": "Température",
         "data/humidity": "Humidité",
@@ -35,15 +34,15 @@ def on_message(client, userdata, msg):
     if msg.topic in data_mapping:
         print(f"{data_mapping[msg.topic]} : {msg.payload.decode()}")
 
-# Créer un client MQTT
-client = mqtt.Client(protocol=mqtt.MQTTv5)  # Utilisation de MQTT v5
+
+client = mqtt.Client(protocol=mqtt.MQTTv5)
 
 # Lier les fonctions de callback
 client.on_connect = on_connect
 client.on_message = on_message
 
 # Se connecter au broker MQTT
-broker = "mqtt.eclipseprojects.io"  # Utilisation du même broker que dans l'ESP32
+broker = "mqtt.eclipseprojects.io"
 port = 1883
 client.connect(broker, port, 60)
 

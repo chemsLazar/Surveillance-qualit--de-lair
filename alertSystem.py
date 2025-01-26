@@ -9,7 +9,6 @@ mqtt_data = {
     "co": None, "no2": None, "co2": None
 }
 
-# Variables pour la gestion des alertes
 alerts = []
 
 # Callback pour réception des données MQTT
@@ -18,7 +17,7 @@ def on_message(client, userdata, msg):
     try:
         mqtt_data[msg.topic.split("/")[-1]] = float(msg.payload.decode())
     except ValueError:
-        pass  # Ignorer les erreurs de conversion
+        pass
 
     # Vérifier les alertes (Exemple: seuil pour PM2.5)
     if mqtt_data["pm25"] is not None and mqtt_data["pm25"] > 50:
@@ -32,7 +31,7 @@ def start_mqtt():
     client.on_message = on_message
     client.connect("mqtt.eclipseprojects.io", 1883, 60)
 
-    # S'abonner aux capteurs
+
     for topic in mqtt_data.keys():
         client.subscribe(f"data/{topic}")
 
