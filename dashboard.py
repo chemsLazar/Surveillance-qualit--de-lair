@@ -4,7 +4,8 @@ from dash.dependencies import Input, Output
 import plotly.graph_objects as go
 import threading
 import paho.mqtt.client as mqtt
-from sendEmail import send_email  
+import time
+import sendEmail
 
 # Initialisation des données MQTT
 mqtt_data = {
@@ -32,8 +33,10 @@ CRITICAL_THRESHOLDS = {
     "no2": {"min": 0, "max": 200},
 }
 
-
 alerts = []
+
+# Initialisation de last_email_time
+last_email_time = 0  # Ajout de cette ligne pour initialiser last_email_time
 
 # Callback pour réception des données MQTT
 def on_message(client, userdata, msg):
@@ -61,10 +64,14 @@ threading.Thread(target=start_mqtt, daemon=True).start()
 app = dash.Dash(__name__)
 app.title = "Surveillance Qualité de l'Air"
 
+# Importer la fonction pour envoyer des emails
+from sendEmail import send_email
+
 # Fonction pour vérifier les anomalies
 def check_anomalies():
-    global mqtt_data, alerts
+    global mqtt_data, alerts, last_email_time
     alerts = []
+    current_time = time.time()
 
     for sensor, thresholds in CRITICAL_THRESHOLDS.items():
         value = mqtt_data.get(sensor)
@@ -74,9 +81,17 @@ def check_anomalies():
             elif value > thresholds["max"]:
                 alerts.append(f"⚠️ {sensor} trop élevé (Seuil: {thresholds['max']})")
 
-   
-    if alerts:
+            # Vérification des alertes critiques
+            if sensor == "pm25" and value > 80:
+                alerts.append(f"🚨 {sensor} CRITIQUE ! (Valeur: {value}, Seuil: 80)")
+            if sensor == "temperature" and value > 40:
+                alerts.append(f"🚨 {sensor} CRITIQUE ! (Valeur: {value}, Seuil: 40)")
+
+    # Vérifier si des alertes existent et si 3 minutes se sont écoulées depuis le dernier email
+    if alerts and (current_time - last_email_time > 180):  # 180 secondes = 3 minutes
         send_email(alerts)
+        last_email_time = current_time  # Mettre à jour le dernier envoi
+
 
 # Mise à jour des graphiques en temps réel
 @app.callback(
@@ -90,17 +105,17 @@ def check_anomalies():
     [Input('interval-component', 'n_intervals')]
 )
 def update_graphs(n_intervals):
-    global mqtt_data, pm25_values, pm10_values, co_values, co2_values, no2_values, humidity_values, temperature_values
+    global mqtt_data, pm25_values, pm10_values, co_values, co2_values, no2_values, humidity_values, temperature_values, last_email_time
 
-
+    # Vérification des anomalies et envoi d'email si nécessaire
     check_anomalies()
-
 
     def update_line_chart(values, new_value):
         """ Ajouter la nouvelle valeur et conserver l'historique. """
-        values.append(new_value)
-        if len(values) > 20:
-            values.pop(0)
+        if new_value is not None:
+            values.append(new_value)
+            if len(values) > 20:
+                values.pop(0)
         return values
 
     def create_bar_figure(title, pm25, pm10):
@@ -136,13 +151,13 @@ def update_graphs(n_intervals):
         return figure
 
     # Mettre à jour les valeurs pour les graphiques en ligne
-    pm25_values = update_line_chart(pm25_values, mqtt_data["pm25"])
-    pm10_values = update_line_chart(pm10_values, mqtt_data["pm10"])
-    co_values = update_line_chart(co_values, mqtt_data["co"])
-    co2_values = update_line_chart(co2_values, mqtt_data["co2"])
-    no2_values = update_line_chart(no2_values, mqtt_data["no2"])
-    humidity_values = update_line_chart(humidity_values, mqtt_data["humidity"])
-    temperature_values = update_line_chart(temperature_values, mqtt_data["temperature"])
+    pm25_values = update_line_chart(pm25_values, mqtt_data.get("pm25"))
+    pm10_values = update_line_chart(pm10_values, mqtt_data.get("pm10"))
+    co_values = update_line_chart(co_values, mqtt_data.get("co"))
+    co2_values = update_line_chart(co2_values, mqtt_data.get("co2"))
+    no2_values = update_line_chart(no2_values, mqtt_data.get("no2"))
+    humidity_values = update_line_chart(humidity_values, mqtt_data.get("humidity"))
+    temperature_values = update_line_chart(temperature_values, mqtt_data.get("temperature"))
 
     # Graphique PM2.5 et PM10 (Bar Chart)
     pm_figure = create_bar_figure("PM2.5 et PM10 (µg/m³)", mqtt_data["pm25"], mqtt_data["pm10"])
@@ -167,7 +182,68 @@ def update_graphs(n_intervals):
     temperature_figure = create_gauge_figure("Température (°C)", mqtt_data["temperature"], -10, 50, '#ff7f0e')
 
     # Mise à jour des alertes : afficher seulement les alertes détectées
-    alert_elements = [html.Div(alert, style={'color': 'red', 'fontWeight': 'bold'}) for alert in alerts] if alerts else [html.Div("Aucune anomalie détectée.", style={'color': 'green', 'fontWeight': 'bold'})]
+    alert_elements = []
+    if alerts:
+        for alert in alerts:
+            # Pour les alertes critiques ou élevées, appliquer le fond uniquement au texte
+            if "trop élevé" in alert or "CRITIQUE" in alert:
+                alert_elements.append(
+                    html.Div(
+                        children=[
+                            html.Span(
+                                alert, 
+                                style={
+                                    'color': 'white', 
+                                    'fontWeight': 'bold', 
+                                    'backgroundColor': '#FF6347',  # Rouge orangé
+                                    'padding': '5px', 
+                                    'borderRadius': '5px'
+                                }
+                            )
+                        ],
+                        style={'marginBottom': '10px'}  # Espace de 10px entre les alertes
+                    )
+                )
+            else:
+                # Autres alertes normales (par exemple "trop bas")
+                alert_elements.append(
+                    html.Div(
+                        children=[
+                            html.Span(
+                                alert, 
+                                style={
+                                    'color': 'white', 
+                                    'fontWeight': 'bold', 
+                                    'backgroundColor': '#FFA500',  # Orange
+                                    'padding': '5px', 
+                                    'borderRadius': '5px'
+                                }
+                            )
+                        ],
+                        style={'marginBottom': '10px'}  # Espace de 10px entre les alertes
+                    )
+                )
+    else:
+        # Si aucune anomalie, mettre une alerte "Aucune anomalie détectée" en vert
+        alert_elements.append(
+            html.Div(
+                children=[
+                    html.Span(
+                        "Aucune anomalie détectée.",
+                        style={
+                            'color': 'green', 
+                            'fontWeight': 'bold', 
+                            'backgroundColor': '#e0f7e0',  # Vert clair
+                            'padding': '5px', 
+                            'borderRadius': '5px'
+                        }
+                    )
+                ],
+                style={'marginBottom': '10px'}  # Espace de 10px entre les alertes
+            )
+        )
+
+
 
     return pm_figure, co_figure, humidity_figure, temperature_figure, alert_elements
 
@@ -190,6 +266,5 @@ app.layout = html.Div([
     ], style={'display': 'grid', 'gridTemplateColumns': 'repeat(2, 1fr)', 'gap': '20px'})
 ])
 
-
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8051)
+    app.run_server(debug=True)
